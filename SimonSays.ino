@@ -1,3 +1,5 @@
+// ----------------------------------------------------------------------------
+
 class Pad 
 {
   public:
@@ -20,12 +22,22 @@ class Pad
       delay(iDuration);               
       digitalWrite(mLedPin, LOW);  
     }
+
+    void flash(unsigned long iDuration)
+    {
+      unsigned long start = millis();
+      while((millis() - start) < iDuration)
+      {
+        digitalWrite(mLedPin, HIGH);   
+        delay(100);               
+        digitalWrite(mLedPin, LOW);   
+      }
+    }
     
-    bool ckeckPressed()
+    bool checkPressed()
     {
       if(digitalRead(mButtonPin) == LOW)
       {
-        unsigned long start = millis();
         while(digitalRead(mButtonPin) == LOW){}
         return true;  
       }
@@ -37,8 +49,11 @@ class Pad
     uint8_t mButtonPin;  
 };
 
+// ----------------------------------------------------------------------------
 
 class I_Engine;
+
+// ----------------------------------------------------------------------------
 
 class I_Stage 
 {
@@ -47,24 +62,21 @@ class I_Stage
     virtual I_Stage& process(I_Engine& iEngine) = 0;
 };
 
+// ----------------------------------------------------------------------------
+
 class I_Engine 
 {
   public:
-    enum {NUMBER_OF_PADS = 4};
-    typedef Pad Pads[NUMBER_OF_PADS];
-  
-    enum {SEQUENCE_LENGHT = 100};
-    typedef uint8_t Sequence[SEQUENCE_LENGHT]; 
-  
+   
     virtual ~I_Engine(){}
+
+    virtual uint8_t waitForPressed() = 0;
+ 
     virtual void setupSequence() = 0;
+    virtual void showSequence() = 0;
+    virtual bool checkSequence() = 0;
     virtual void incrementStep() = 0;
-    
-    virtual Pads& getPads() = 0;
-    virtual const Sequence& getSequence() = 0;   
-    virtual size_t getStep() = 0; 
-    virtual unsigned long getSpeed() = 0;
-    
+     
     virtual I_Stage& getStart()  = 0;
     virtual I_Stage& getShowSequence()  = 0;
     virtual I_Stage& getCheckSequence()  = 0;
@@ -72,23 +84,20 @@ class I_Engine
     
 };
 
+// ----------------------------------------------------------------------------
+
 class StartStage : public I_Stage 
 {
   public:
     virtual I_Stage& process(I_Engine& iEngine) 
     {
-      for(size_t i = 0 ; i < I_Engine::NUMBER_OF_PADS ; i++)
-      {
-        Serial.println(i);
-        if (iEngine.getPads()[i].ckeckPressed())
-        {
-          iEngine.setupSequence();  
-          return iEngine.getShowSequence();
-        }  
-      }
-      return *this;     
+      iEngine.waitForPressed();
+      iEngine.setupSequence();  
+      return iEngine.getShowSequence();      
     }  
 };
+
+// ----------------------------------------------------------------------------
 
 class ShowSequenceStage : public I_Stage 
 {
@@ -96,16 +105,13 @@ class ShowSequenceStage : public I_Stage
   
     virtual I_Stage& process(I_Engine& iEngine) 
     {
-      Serial.print("show step="); Serial.print(iEngine.getStep()); Serial.print(" speed="); Serial.println(iEngine.getSpeed());
-      for(size_t i = 0 ; i < iEngine.getStep(); i++)
-      {
-        Serial.print("  => "); Serial.print(i); Serial.print(" "); Serial.println(iEngine.getSequence()[i]); 
-        iEngine.getPads()[iEngine.getSequence()[i]].pulse(iEngine.getSpeed());
-        delay(100);  
-      } 
+      iEngine.showSequence();
       return iEngine.getCheckSequence();  
     }
 };
+
+
+// ----------------------------------------------------------------------------
 
 class CheckSequenceStage : public I_Stage 
 {
@@ -113,24 +119,23 @@ class CheckSequenceStage : public I_Stage
   
     virtual I_Stage& process(I_Engine& iEngine) 
     {
-      for(size_t i = 0 ; i < I_Engine::NUMBER_OF_PADS ; i++)
+      if(!iEngine.checkSequence())
       {
-        if(iEngine.getPads()[i].ckeckPressed())
-        {
-          iEngine.incrementStep();
-          return iEngine.getShowSequence();
-        }
-        return *this;  
-      }       
+        return iEngine.getStart();
+      }
+      iEngine.incrementStep();
+      return iEngine.getShowSequence();    
     }
 };
 
+// ----------------------------------------------------------------------------
 
 class Engine : public I_Engine 
 {
-  public: 
-    
-    
+  public:
+    enum {NUMBER_OF_PADS = 4};
+    enum {NUMBER_OF_LEVELS = 100};
+       
     void setup(uint8_t iLedStartPin, uint8_t iButtonStartPin)
     {
       // seed the pseudo-random number generator with a floating analog input
@@ -149,42 +154,82 @@ class Engine : public I_Engine
       {
         stage = &stage->process(*this);  
       }    
-    }  
-  
+    } 
+
+    virtual uint8_t waitForPressed()
+    {
+      while(true)
+      {
+        for(size_t i = 0 ; i < NUMBER_OF_PADS ; i++)
+        {
+          if (mPads[i].checkPressed())
+          {
+            return i;
+          }  
+        }    
+      }
+    }
+
     virtual void setupSequence()
     {
-      for(size_t i = 0; i < SEQUENCE_LENGHT; i++)
+      for(size_t i = 0; i < NUMBER_OF_LEVELS; i++)
       {
         mSequence[i] = random(4);
       }
-      mStep = 3;
+      mLevel = 3;
+    }
+    
+    virtual void showSequence()
+    {
+      Serial.print("show step="); Serial.print(mLevel); Serial.print(" speed="); Serial.println(speed());
+      for(size_t i = 0 ; i < mLevel; i++)
+      {
+        Serial.print("  => "); Serial.print(i); Serial.print(" "); Serial.println(mSequence[i]); 
+        mPads[mSequence[i]].pulse(speed());
+        delay(100);  
+      }   
+    }
+
+    virtual bool checkSequence()
+    {
+      Serial.print("check step="); Serial.print(mLevel); Serial.print(" speed="); Serial.println(speed());
+      for(size_t i = 0 ; i < mLevel; i++)
+      {
+        Serial.print("  => "); Serial.print(i); Serial.print(" "); Serial.println(mSequence[i]); 
+        uint8_t pressedPad = waitForPressed();        
+        if (pressedPad != mSequence[i]);
+        {
+          mPads[mSequence[i]].flash(1000);
+          return false;     
+        }
+        return true;
+      }   
     }
     
     virtual void incrementStep() 
     {
-      mStep++;  
+      mLevel++;  
     }
-    
-    virtual Pads& getPads() {return mPads;}
-    virtual const Sequence& getSequence() {return mSequence;}
-    virtual size_t getStep() {return mStep;}
-    virtual unsigned long getSpeed() {return 500;}
     
     virtual I_Stage& getStart() {return mStartStage; }
     virtual I_Stage& getShowSequence() {return mShowSequenceStage; }
     virtual I_Stage& getCheckSequence() {return mCheckSequenceStage; }
   
   private:
-    Pads mPads;
-  
+
+    unsigned long speed() {return 700 - (mLevel * 10); }
+
+    Pad mPads[NUMBER_OF_PADS];
+    uint8_t mSequence[NUMBER_OF_LEVELS];
     StartStage mStartStage;
     ShowSequenceStage mShowSequenceStage;
     CheckSequenceStage mCheckSequenceStage;
-    
-    Sequence mSequence;
-    size_t mStep;
+    size_t mLevel;
     
 };
+
+// ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
 Engine sEngine;
 
@@ -199,3 +244,6 @@ void loop()
 { 
   sEngine.run();
 } 
+
+// ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------

@@ -30,7 +30,8 @@ class Pad
       {
         digitalWrite(mLedPin, HIGH);   
         delay(100);               
-        digitalWrite(mLedPin, LOW);   
+        digitalWrite(mLedPin, LOW);  
+        delay(100); 
       }
     }
     
@@ -91,6 +92,7 @@ class StartStage : public I_Stage
   public:
     virtual I_Stage& process(I_Engine& iEngine) 
     {
+      Serial.println("start wait for start key");
       iEngine.waitForPressed();
       iEngine.setupSequence();  
       return iEngine.getShowSequence();      
@@ -196,14 +198,17 @@ class Engine : public I_Engine
       for(size_t i = 0 ; i < mLevel; i++)
       {
         Serial.print("  => "); Serial.print(i); Serial.print(" "); Serial.println(mSequence[i]); 
-        uint8_t pressedPad = waitForPressed();        
-        if (pressedPad != mSequence[i]);
+        uint8_t pressedPad = waitForPressed();    
+        Serial.print("  pressedPad =  "); Serial.print(pressedPad); Serial.print(" mSequence = "); Serial.println(mSequence[i]);    
+        if (pressedPad != mSequence[i])
         {
+          Serial.println("wrong");
           mPads[mSequence[i]].flash(1000);
           return false;     
         }
-        return true;
-      }   
+        Serial.println("correct");
+      } 
+      return true;  
     }
     
     virtual void incrementStep() 
